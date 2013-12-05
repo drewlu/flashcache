@@ -46,10 +46,12 @@
 void
 usage(char *pname)
 {
-	fprintf(stderr, "Usage: %s [-v] [-p back|thru|around] [-b block size] [-m md block size] [-s cache size] [-a associativity] cachedev ssd_devname disk_devname\n", pname);
+	fprintf(stderr, "Usage: %s [-v] [-p back|thru|around] [-b block size] [-m md block size] [-s cache size] [-a associativity] [-r] cachedev ssd_devname disk_devname\n", pname);
 	fprintf(stderr, "Usage : %s Cache Mode back|thru|around is required argument\n",
 		pname);
 	fprintf(stderr, "Usage : %s Default units for -b, -m, -s are sectors, or specify in k/M/G. Default associativity is 512.\n",
+		pname);
+	fprintf(stderr, "Usage : %s Use -r for request based mode.\n",
 		pname);
 #ifdef COMMIT_REV
 	fprintf(stderr, "git commit: %s\n", COMMIT_REV);
@@ -146,21 +148,32 @@ module_loaded(void)
 }
 
 static void
-load_module(void)
+load_module(int request_based)
 {
 	FILE *fp;
 	char line[8192];
+	int ret;
 
-	if (!module_loaded()) {
-		if (verbose)
-			fprintf(stderr, "Loading Flashcache Module\n");
-		system("modprobe flashcache");
-		if (!module_loaded()) {
-			fprintf(stderr, "Could not load Flashcache Module\n");
+	if (module_loaded()) {
+		sprintf(line, "rmmod flashcache");
+		ret = system(line);
+		if (ret) {
+			fprintf(stderr, "Could not rmmod flashcache\n");
 			exit(1);
 		}
-	} else if (verbose)
-			fprintf(stderr, "Flashcache Module already loaded\n");
+	}
+
+	if (verbose)
+		fprintf(stderr, "Loading Flashcache Module\n");
+	sprintf(line, "modprobe flashcache request_based=%d",
+			request_based);
+	system(line);
+	if (!module_loaded()) {
+		fprintf(stderr, "Could not load Flashcache Module\n");
+		exit(1);
+	}
+
+	/*
 	fp = fopen("/proc/flashcache/flashcache_version", "ro");
 	fgets(line, 8190, fp);
 	if (fgets(line, 8190, fp)) {
@@ -174,6 +187,7 @@ load_module(void)
 #endif
 	}
 	fclose(fp);
+	*/
 }
 
 static void 
@@ -204,10 +218,11 @@ main(int argc, char **argv)
 	int associativity = 512;
 	int ret;
 	int cache_mode = -1;
+	int request_based = 0;
 	char *cache_mode_str;
 	
 	pname = argv[0];
-	while ((c = getopt(argc, argv, "fs:b:m:va:p:")) != -1) {
+	while ((c = getopt(argc, argv, "fs:b:m:va:p:r")) != -1) {
 		switch (c) {
 		case 's':
 			cache_size = get_cache_size(optarg);
@@ -243,6 +258,9 @@ main(int argc, char **argv)
 			} else
 				usage(pname);
                         break;			
+		case 'r':
+			request_based = 1;
+			break;
 		case '?':
 			usage(pname);
 		}
@@ -355,7 +373,7 @@ main(int argc, char **argv)
 	/* Go ahead and create the cache.
 	 * XXX - Should use the device mapper library for this.
 	 */
-	load_module();
+	load_module(request_based);
 	if (verbose)
 		fprintf(stderr, "Creating FlashCache Volume : \"%s\"\n", dmsetup_cmd);
 	ret = system(dmsetup_cmd);
